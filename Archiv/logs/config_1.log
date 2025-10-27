@@ -1,0 +1,42 @@
+2025-09-25 09:02:37,238 - [INFO] Run gestartet mit Config: config_1.json
+2025-09-25 09:02:37,308 - [INFO] Training Fold 1/10...
+2025-09-25 09:02:37,602 - [INFO] Initial Hyperparameter: noise=0.6932, lengthscale=0.6931, outputscale=0.6931, mean=0.0000
+2025-09-25 09:04:32,373 - [INFO] Final Hyperparameter: noise=0.7587, lengthscale=0.2690, outputscale=0.1677, mean=-0.1452
+2025-09-25 09:04:32,378 - [INFO] Fold 1: R²=0.148, MAE=0.511
+2025-09-25 09:04:32,378 - [INFO] Training Fold 2/10...
+2025-09-25 09:04:32,380 - [INFO] Initial Hyperparameter: noise=0.6932, lengthscale=0.6931, outputscale=0.6931, mean=0.0000
+2025-09-25 09:06:26,157 - [INFO] Final Hyperparameter: noise=0.7477, lengthscale=0.2798, outputscale=0.1854, mean=-0.1394
+2025-09-25 09:06:26,162 - [INFO] Fold 2: R²=0.190, MAE=0.479
+2025-09-25 09:06:26,162 - [INFO] Training Fold 3/10...
+2025-09-25 09:06:26,164 - [INFO] Initial Hyperparameter: noise=0.6932, lengthscale=0.6931, outputscale=0.6931, mean=0.0000
+2025-09-25 09:08:33,769 - [INFO] Final Hyperparameter: noise=0.8114, lengthscale=0.5917, outputscale=0.1474, mean=-0.1825
+2025-09-25 09:08:33,776 - [INFO] Fold 3: R²=0.165, MAE=0.510
+2025-09-25 09:08:33,777 - [INFO] Training Fold 4/10...
+2025-09-25 09:08:33,780 - [INFO] Initial Hyperparameter: noise=0.6932, lengthscale=0.6931, outputscale=0.6931, mean=0.0000
+2025-09-25 09:10:46,116 - [INFO] Final Hyperparameter: noise=0.7428, lengthscale=0.2570, outputscale=0.1748, mean=-0.1423
+2025-09-25 09:10:46,125 - [INFO] Fold 4: R²=0.179, MAE=0.487
+2025-09-25 09:10:46,125 - [INFO] Training Fold 5/10...
+2025-09-25 09:10:46,129 - [INFO] Initial Hyperparameter: noise=0.6932, lengthscale=0.6931, outputscale=0.6931, mean=0.0000
+2025-09-25 09:13:00,704 - [INFO] Final Hyperparameter: noise=0.7932, lengthscale=0.3150, outputscale=0.1576, mean=-0.1494
+2025-09-25 09:13:00,709 - [INFO] Fold 5: R²=0.189, MAE=0.460
+2025-09-25 09:13:00,709 - [INFO] Training Fold 6/10...
+2025-09-25 09:13:00,713 - [INFO] Initial Hyperparameter: noise=0.6932, lengthscale=0.6931, outputscale=0.6931, mean=0.0000
+2025-09-25 09:15:25,060 - [INFO] Final Hyperparameter: noise=0.7763, lengthscale=0.3065, outputscale=0.1573, mean=-0.1501
+2025-09-25 09:15:25,065 - [INFO] Fold 6: R²=0.159, MAE=0.491
+2025-09-25 09:15:25,066 - [INFO] Training Fold 7/10...
+2025-09-25 09:15:25,069 - [INFO] Initial Hyperparameter: noise=0.6932, lengthscale=0.6931, outputscale=0.6931, mean=0.0000
+2025-09-25 09:17:51,011 - [INFO] Final Hyperparameter: noise=0.8114, lengthscale=0.5352, outputscale=0.1593, mean=-0.1722
+2025-09-25 09:17:51,017 - [INFO] Fold 7: R²=0.147, MAE=0.454
+2025-09-25 09:17:51,017 - [INFO] Training Fold 8/10...
+2025-09-25 09:17:51,022 - [INFO] Initial Hyperparameter: noise=0.6932, lengthscale=0.6931, outputscale=0.6931, mean=0.0000
+2025-09-25 09:19:58,795 - [INFO] Final Hyperparameter: noise=0.7867, lengthscale=0.3729, outputscale=0.1315, mean=-0.1619
+2025-09-25 09:19:58,801 - [INFO] Fold 8: R²=0.207, MAE=0.535
+2025-09-25 09:19:58,801 - [INFO] Training Fold 9/10...
+2025-09-25 09:19:58,804 - [INFO] Initial Hyperparameter: noise=0.6932, lengthscale=0.6931, outputscale=0.6931, mean=0.0000
+2025-09-25 09:21:59,456 - [INFO] Final Hyperparameter: noise=0.7272, lengthscale=0.2692, outputscale=0.1974, mean=-0.1390
+2025-09-25 09:21:59,461 - [INFO] Fold 9: R²=0.124, MAE=0.474
+2025-09-25 09:21:59,462 - [INFO] Training Fold 10/10...
+2025-09-25 09:21:59,464 - [INFO] Initial Hyperparameter: noise=0.6932, lengthscale=0.6931, outputscale=0.6931, mean=0.0000
+2025-09-25 09:24:16,950 - [INFO] Final Hyperparameter: noise=0.7850, lengthscale=0.3148, outputscale=0.1323, mean=-0.1555
+2025-09-25 09:24:16,955 - [INFO] Fold 10: R²=0.141, MAE=0.497
+2025-09-25 09:24:16,956 - [INFO] Mittelwerte über alle Folds: R²=0.165, MAE=0.490

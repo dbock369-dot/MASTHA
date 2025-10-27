@@ -1,0 +1,3 @@
+2025-09-26 11:30:42,216 - [INFO] Run gestartet mit Config: config_2.json
+2025-09-26 11:30:42,307 - [INFO] Training Fold 1/10...
+2025-09-26 11:30:42,562 - [INFO] Initial Hyperparameter: noise=0.0100, lengthscale=0.5000, outputscale=1.0000, mean=0.0000

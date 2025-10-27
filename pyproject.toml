@@ -1,0 +1,23 @@
+[project]
+name = "masta"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "altair>=5.5.0",
+    "gpytorch==1.11",
+    "ipython>=9.6.0",
+    "jax>=0.7.2",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.9.4",
+    "matplotlib-inline>=0.1.7",
+    "numpy>=2.0.2",
+    "pandas>=2.3.2",
+    "pymatgen>=2025.10.7",
+    "pyyaml>=6.0.2",
+    "scikit-learn>=1.6.1",
+    "si-units>=0.11.0",
+    "torch>=2.3.0,<2.4.0",
+    "torcheval>=0.0.7",
+]

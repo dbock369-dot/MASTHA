@@ -1,0 +1,32 @@
+{
+  "data": {
+    "csv_main": "/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/2025_09_10_DB_100Bins_Merged.csv",
+    "csv_supp": "/Users/danielbock/MASTERTHESIS/MASTA/structure_mass.csv"
+    },
+  "preprocessing": {
+    "label": "beladung_mol_per_kg",
+    "label_normalize": false,
+    "feature_normalize": true
+  },
+  "conditions": {
+    "temperature_kelvin": 400,
+    "pressure_bar": 1.0
+  },
+  "training": {
+  "kfold_splits": 10,
+  "shuffle": true,
+  "random_seed": 42,
+  "gp": {
+  "learning_rate": 0.1,
+  "training_iter": 200,
+  "kernel": "RBF",
+  "init_params": {
+    "likelihood.noise_covar.noise": 0.01,
+    "mean_module.constant": 0.0,
+    "covar_module.base_kernel.lengthscale": 0.5,
+    "covar_module.outputscale": 1.0
+  }
+}
+
+  }
+}

@@ -1,0 +1,15 @@
+# Virtuelle Umgebung ignorieren
+.venv/
+
+# Python-Cache-Dateien ignorieren
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3.ipynb_checkpoints/
+*.DS_Store
+DataArchiv/*.csv
+.ipynb_checkpoints/
+*.csv
+Results/
+DataArchiv/

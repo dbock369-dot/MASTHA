@@ -15,13 +15,22 @@ from pathlib import Path
 # ------------------------------------------------------------
 
 def is_bin_column(col) -> bool:
+    # numerische Spaltennamen erlauben
     if isinstance(col, (int, np.integer)):
         return True
+
     s = str(col)
+
+    # rein numerischer Spaltenname: '0', '1', ...
     if s.isdigit():
         return True
-    if re.fullmatch(r"bin_\d+", s):
+
+    # bin_X oder bin_X_high / bin_X_low
+    if re.fullmatch(r"bin_\d+(_high|_low)?", s):
         return True
+    if re.fullmatch(r"bin_\d+", s): # 'bin_0', 'bin_1', ...
+        return True
+
     return False
 
 
@@ -70,8 +79,8 @@ RESULTS_DIR = BASE_DIR / "Results"
 
 VEXT_FOLDER = DATA_DIR / "Vext_allcsv"
 DFT_FILE = DATA_DIR / "DFT_Data_clean_06_10.csv"
-SAVE_RESULTS = RESULTS_DIR / "GP_results_allVext.csv"
-SAVE_METRICS = RESULTS_DIR / "GP_metrics_summary.csv"
+SAVE_RESULTS = RESULTS_DIR / "GP_results_vext_chem.csv"
+SAVE_METRICS = RESULTS_DIR / "GP_metrics_summary_vext_chem.csv"
 
 normalize_feature = True
 normalize_labels = True

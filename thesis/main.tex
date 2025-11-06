@@ -1,0 +1,44 @@
+\documentclass{article}
+
+% Packages
+\usepackage[utf8]{inputenc}        % Eingabekodierung
+\usepackage[T1]{fontenc}           % Schriftkodierung
+\usepackage[ngerman]{babel}        % Sprache (für Silbentrennung etc.)
+\usepackage[a4paper, left=3cm, right=2.5cm, top=2.5cm, bottom=2.5cm]{geometry}
+\usepackage{setspace}
+\onehalfspacing  
+\usepackage{lmodern}               % Moderne serifenbetonte Schrift (Standard)
+\usepackage{graphicx}             % Für Bilder
+\usepackage{siunitx}
+\usepackage{amsmath, amssymb}     % Mathematisches
+\usepackage{hyperref}             % Klickbare Links im PDF
+\usepackage{caption}              % Bild-/Tabellenunterschriften besser steuern
+\usepackage{csquotes}             % Für saubere Zitate
+\usepackage{fancyhdr}
+
+\pagestyle{fancy}
+\fancyhf{} 
+\fancyhead[L]{\nouppercase{\leftmark}}
+\fancyhead[R]{\thepage}
+
+\begin{document}
+
+% Formatierung aufgehoben für Titelseite
+\begin{titlepage}
+\thispagestyle{empty} % keine Kopf-/Fußzeile auf dieser Seite
+\fancypagestyle{plain}{%
+  \fancyhf{} % alle Felder leeren
+  \renewcommand{\headrulewidth}{0pt} % keine Linie oben
+  \renewcommand{\footrulewidth}{0pt} % keine Linie unten
+}
+\pagestyle{plain} % wendet obige Definition an
+\input{Titelseite}
+\end{titlepage}
+
+\input{Aufgabenstellung}
+\input{Bearbeitungen/a)}
+\input{Bearbeitungen/b)}
+\input{Bearbeitungen/c)}
+\input{Bearbeitungen/d)}
+
+\end{document}

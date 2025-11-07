@@ -80,6 +80,9 @@ def train_gp(xt_train, yt_train, training_iterations=100):
 
     return model.eval(), likelihood.eval(), losses
 
+
+# Einstellungen 
+
 # dft Daten - beladungen, grid etc
 dft_data1 = pd.read_csv('/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/DFT_Data_clean_06_10.csv')
 dft_data2 = pd.read_csv("/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/dft_fckin_clean_kond_64grid.csv")
@@ -108,12 +111,6 @@ data_low = data[(data.temperature_kelvin == 325) & (data.pressure_bar == 1)]
 data_low = data_low.drop_duplicates(subset=["structure_name", "temperature_kelvin", "pressure_bar"])
 feature_columns_low = [col for col in data_low.columns if is_bin_column(col)]
 
-#duplicates = data[data.duplicated(subset=["structure_name", "temperature_kelvin", "pressure_bar"], keep=False)]
-#print(duplicates[["structure_name", "temperature_kelvin", "pressure_bar"]])
-
-print(data_high.shape == data_low.shape)
-print(f"Data_HIGH: {data_high.shape}")
-print(f"Data_LOW: {data_low.shape}")
 
 add_features = True
 

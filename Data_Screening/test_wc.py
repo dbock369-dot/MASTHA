@@ -1,3 +1,7 @@
+# ============================================================
+# WORKING CAPACITY — DATA GENERATION (GP screening + BO(Random/EI/UCB) logging)
+# (adapted to match your new "acq screening" setup and plotting expectations)
+# ============================================================
 import pandas as pd
 import torch
 import numpy as np
@@ -23,11 +27,8 @@ LABEL = "working_capacity"
 # Each tuple: (temp_high, pres_high, temp_low, pres_low)
 WC_STATES = [
     (298.0, 5.0, 298.0, 1.0),
-    #(298.0, 1.0,   298.0, 0.1),
-    (298.0, 1.0,   298.0, 0.1),
-    (400.0, 1.0,   298.0, 1.0),
-    #(373.0, 1.0,   298.0, 1.0),
-    #(348.0, 1.0,   298.0, 1.0)
+    (298.0, 1.0, 298.0, 0.1),
+    (400.0, 1.0, 298.0, 1.0),
 ]
 
 N_SPLITS = 10
@@ -39,30 +40,28 @@ N_BO_RUNS = 20
 BO_MAX_ITER = 100
 BO_PATIENCE = 10
 
-INIT_STRATEGY = "kmeans"    # "kmeans" or "random"
-ACQ = ["ucb", "ei"]                 # "ei" or "ucb"
+INIT_STRATEGY = "kmeans"           # "kmeans" or "random"
+ACQ_LIST = ["ucb", "ei"]           # test both
 
 # EI params
 XI0, XI_MIN = 0.05, 0.005
 # UCB params
 BETA0, BETA_MIN = 3.0, 1.0
 
-# output files
-POOLED_LOG_FILE = BASE / "gp_pooled_r2_log_wc_dens_ucb5.csv"
-RESULTS_FILE     = BASE / "bo_random_results_wc_dens_ucb5.csv"
-HISTORY_FILE     = BASE / "bo_random_history_wc_dens_ucb5.csv"
+# output files (acq-neutral names!)
+POOLED_LOG_FILE = BASE / "gp_pooled_r2_log_wc_dens_20fresh.csv"
+RESULTS_FILE    = BASE / "bo_random_results_wc_dens_20fresh.csv"
+HISTORY_FILE    = BASE / "bo_random_history_wc_dens_20fresh.csv"
 
 # input files
 DFT_FILE_1 = BASE / "dft_data_temp_pressure_swingswingswing.csv"
 DFT_FILE_2 = BASE / "dft_data_temp_pressure_swingswingswing5.csv"
-#DFT_FILE_2 = BASE / "dft_data_temp_pressure_präsi_20bin.csv"
 VEXT_FILE  = BASE / "Vext_allTEMP_hist_no_pressure_no_chem_20b_swing.csv"
 
 # ============================================================
 # HELPERS
 # ============================================================
 def is_bin_column(col) -> bool:
-    # raw bin columns before suffixing might be ints or digit-strings or "bin_###"
     if isinstance(col, (int, np.integer)):
         return True
     s = str(col)
@@ -73,12 +72,10 @@ def is_bin_column(col) -> bool:
     return False
 
 def is_suffixed_bin_column(col: str, suffix: str) -> bool:
-    # after merge we expect columns like "0_high" / "bin_12_high"
     s = str(col)
     if not s.endswith(suffix):
         return False
     base = s[: -len(suffix)]
-    # base might end with "_" due to naming, guard:
     if base.endswith("_"):
         base = base[:-1]
     return is_bin_column(base)
@@ -192,31 +189,25 @@ def ucb(mean, var, beta=2.0):
 # BUILD WORKING CAPACITY DATASET
 # ============================================================
 def build_wc_dataset(data_all, temp_high, pres_high, temp_low, pres_low):
-    # filter states
     high = data_all[(data_all["temperature_kelvin"] == temp_high) &
                     (data_all["pressure_bar"] == pres_high)].copy()
     low  = data_all[(data_all["temperature_kelvin"] == temp_low) &
                     (data_all["pressure_bar"] == pres_low)].copy()
 
-    # uniqueness per structure+state
     high = high.drop_duplicates(subset=["structure_name", "temperature_kelvin", "pressure_bar"])
     low  = low.drop_duplicates(subset=["structure_name", "temperature_kelvin", "pressure_bar"])
 
-    # bin cols per side (before merge)
     feat_high = [c for c in high.columns if is_bin_column(c)]
     feat_low  = [c for c in low.columns  if is_bin_column(c)]
 
-    # beladung_pro_vol per side
     for df in (high, low):
         df["beladung_pro_vol"] = df["beladung_atoms"].div(df["volume_kubAng"], axis=0)
 
-    # normalize bin features per side
     high[feat_high] = (high[feat_high].multiply(high["grid.dv"], axis=0)
                                   .div(high["volume_kubAng"], axis=0))
     low[feat_low]   = (low[feat_low].multiply(low["grid.dv"], axis=0)
                                 .div(low["volume_kubAng"], axis=0))
 
-    # merge only what we need + bins
     high_keep = ["structure_name", "beladung_pro_vol"] + feat_high
     low_keep  = ["structure_name", "beladung_pro_vol"] + feat_low
 
@@ -228,28 +219,24 @@ def build_wc_dataset(data_all, temp_high, pres_high, temp_low, pres_low):
         how="inner"
     )
 
-    # label
     merged["working_capacity"] = (merged["beladung_pro_vol_high"] - merged["beladung_pro_vol_low"]).abs()
     merged["working_capacity"] = pd.to_numeric(merged["working_capacity"], errors="coerce")
 
-    # feature columns: concat bins_high + bins_low (stable sort)
     feat_high_merged = sorted([c for c in merged.columns if is_suffixed_bin_column(c, "_high")])
     feat_low_merged  = sorted([c for c in merged.columns if is_suffixed_bin_column(c, "_low")])
     feature_columns = feat_high_merged + feat_low_merged
 
-    # state metadata for logging
     merged["temp_high"] = float(temp_high)
     merged["pres_high"] = float(pres_high)
     merged["temp_low"]  = float(temp_low)
     merged["pres_low"]  = float(pres_low)
+    merged["wc_state"]  = wc_state_label(temp_high, pres_high, temp_low, pres_low)
 
-    # drop NaNs in label + features
     merged = merged.dropna(subset=["working_capacity"] + feature_columns).copy()
-
     return merged, feature_columns
 
 # ============================================================
-# BO / RANDOM TRAJECTORY
+# BO / RANDOM TRAJECTORY (logs acq + acq_param per iter)
 # ============================================================
 def run_one_bo_or_random(
         *,
@@ -261,7 +248,7 @@ def run_one_bo_or_random(
         label,
         max_iter,
         patience,
-        acq,                      # "ei" or "ucb"
+        acq,                      # "ei" or "ucb" (for random: "none")
         XI0, XI_MIN,
         BETA0, BETA_MIN,
         feature_scaler,
@@ -273,11 +260,11 @@ def run_one_bo_or_random(
     selected = candidates.loc[initial_indices].copy()
     candidates = candidates.drop(initial_indices).copy()
 
-    # numeric WC state
     tH = float(data["temp_high"].iloc[0])
     pH = float(data["pres_high"].iloc[0])
     tL = float(data["temp_low"].iloc[0])
     pL = float(data["pres_low"].iloc[0])
+    wc_state = str(data["wc_state"].iloc[0])
 
     best = [float(selected[label].max())]
     history = [{
@@ -289,14 +276,16 @@ def run_one_bo_or_random(
         "pres_high": pH,
         "temp_low": tL,
         "pres_low": pL,
-        "method": method
+        "wc_state": wc_state,
+        "method": method,
+        "acq": (acq if method == "bo" else "none"),
+        "acq_param": np.nan
     }]
 
     acq_param_last = np.nan
     rng = np.random.default_rng(run_seed)
 
     for i in range(max_iter):
-        # early stop if plateau
         if len(best) >= patience and len(np.unique(np.round(best[-patience:], 12))) == 1:
             break
         if len(candidates) == 0:
@@ -304,6 +293,7 @@ def run_one_bo_or_random(
 
         if method == "random":
             pick = rng.integers(0, len(candidates))
+            acq_param_last = np.nan
 
         elif method == "bo":
             train_x = torch.tensor(
@@ -332,10 +322,12 @@ def run_one_bo_or_random(
                 xi = max(XI_MIN, XI0 * (0.95 ** i))
                 score = log_expected_improvement(mean, var, best_f, xi)
                 acq_param_last = float(xi)
-            else:
+            elif acq == "ucb":
                 beta = max(BETA_MIN, BETA0 * (0.97 ** i))
                 score = ucb(mean, var, beta)
                 acq_param_last = float(beta)
+            else:
+                raise ValueError("For method='bo', acq must be 'ei' or 'ucb'")
 
             pick = int(torch.argmax(score).item())
 
@@ -355,7 +347,10 @@ def run_one_bo_or_random(
             "pres_high": pH,
             "temp_low": tL,
             "pres_low": pL,
-            "method": method
+            "wc_state": wc_state,
+            "method": method,
+            "acq": (acq if method == "bo" else "none"),
+            "acq_param": (float(acq_param_last) if method == "bo" else np.nan)
         })
 
     return best, history, acq_param_last
@@ -369,21 +364,16 @@ dft_data2 = pd.read_csv(DFT_FILE_2)
 for df in (dft_data1, dft_data2):
     df["density_bulk"] = (
         df["density_bulk"]
-        .astype(str)
-        .str.strip()
+        .astype(str).str.strip()
         .str.replace('[', '', regex=False)
         .str.replace(']', '', regex=False)
     )
     df["density_bulk"] = pd.to_numeric(df["density_bulk"], errors="coerce")
 
 dft_data = pd.concat([dft_data1, dft_data2], ignore_index=True).drop_duplicates()
-
 expV_data = pd.read_csv(VEXT_FILE)
 
-# merge
 data_all = pd.merge(dft_data, expV_data, "inner", on=["structure_name", "temperature_kelvin"])
-
-# optional cleanup
 data_all = data_all[data_all["beladung_mol_per_kg"] > 0].copy()
 
 # ============================================================
@@ -393,10 +383,10 @@ kf = KFold(n_splits=N_SPLITS, shuffle=True, random_state=42)
 
 for (tH, pH, tL, pL) in WC_STATES:
     print("\n" + "=" * 80)
-    print(f"WC-STATE: {wc_state_label(tH, pH, tL, pL)}")
+    wc_st = wc_state_label(tH, pH, tL, pL)
+    print(f"WC-STATE: {wc_st}")
 
     data, feature_columns = build_wc_dataset(data_all, tH, pH, tL, pL)
-
     if len(data) < 10:
         print(f"Skipping (too few samples): n={len(data)}")
         continue
@@ -416,13 +406,11 @@ for (tH, pH, tL, pL) in WC_STATES:
         test_df = data.iloc[test_idx].copy()
         test_df["fold"] = fold
 
-        # feature scaling per fold
         feature_transformer = MinMaxScaler()
         feature_transformer.fit(x_train)
         xt_train = torch.tensor(feature_transformer.transform(x_train), dtype=torch.float64)
         xt_test  = torch.tensor(feature_transformer.transform(x_test), dtype=torch.float64)
 
-        # label scaling per fold
         label_transformer = MinMaxScaler()
         label_transformer.fit(y_train.unsqueeze(1))
         yt_train = torch.tensor(label_transformer.transform(y_train.unsqueeze(1)).flatten(), dtype=torch.float64)
@@ -432,12 +420,10 @@ for (tH, pH, tL, pL) in WC_STATES:
         with torch.no_grad():
             pred = model(xt_test)
             y_pred = label_transformer.inverse_transform(pred.mean.unsqueeze(1)).squeeze()
-            # working_capacity should be >=0
             y_pred = np.where(y_pred > 0, y_pred, 0)
 
         test_df[f"{LABEL}_pred"] = y_pred
         test_df["abs_rel_deviation"] = np.abs((test_df[LABEL] - test_df[f"{LABEL}_pred"]) / test_df[LABEL] * 100)
-
         split_info.append(test_df)
 
     results = pd.concat(split_info, ignore_index=True)
@@ -455,7 +441,7 @@ for (tH, pH, tL, pL) in WC_STATES:
         "pres_high": float(pH),
         "temp_low": float(tL),
         "pres_low": float(pL),
-        "wc_state": wc_state_label(tH, pH, tL, pL),
+        "wc_state": wc_st,
         "label": LABEL,
         "n_samples": len(results),
         "pooled_r2": pooled_r2,
@@ -469,7 +455,7 @@ for (tH, pH, tL, pL) in WC_STATES:
     print(f"Saved -> {POOLED_LOG_FILE}")
 
     # -------------------------
-    # 2) BO vs Random (same init)
+    # 2) BO / Random stability runs (Random + BO(EI)+BO(UCB))
     # -------------------------
     global_best_value = float(data[LABEL].max())
     n_candidates = len(data)
@@ -477,11 +463,9 @@ for (tH, pH, tL, pL) in WC_STATES:
     max_iter = BO_MAX_ITER
     patience = BO_PATIENCE
     init = INIT_STRATEGY
-    acq = ACQ
 
     n_initial = max(3, min(10, n_candidates - 1))
 
-    # global scaling per WC state
     feature_scaler = MinMaxScaler().fit(data[feature_columns].values)
     label_scaler   = MinMaxScaler().fit(data[[LABEL]].values)
 
@@ -489,7 +473,6 @@ for (tH, pH, tL, pL) in WC_STATES:
         np.random.seed(run_seed)
         torch.manual_seed(run_seed)
 
-        # initial selection (same for BO and Random)
         if init == "kmeans":
             initial_indices = initial_indices_kmeans(data, feature_columns, n_initial, random_state=run_seed)
         else:
@@ -503,7 +486,7 @@ for (tH, pH, tL, pL) in WC_STATES:
             "pres_high": float(pH),
             "temp_low": float(tL),
             "pres_low": float(pL),
-            "wc_state": wc_state_label(tH, pH, tL, pL),
+            "wc_state": wc_st,
             "label": LABEL,
             "n_candidates": n_candidates,
             "init_strategy": init,
@@ -512,46 +495,10 @@ for (tH, pH, tL, pL) in WC_STATES:
             "max_iter": max_iter,
             "patience": patience,
             "global_best": global_best_value,
-            "acq": acq,
         }
 
-        # BO run
-        run_id_bo = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_wc_TH{tH:g}_pH{pH:g}_TL{tL:g}_pL{pL:g}_s{run_seed}_bo"
-        best_bo, hist_bo, acq_param_last_bo = run_one_bo_or_random(
-            method="bo",
-            run_id=run_id_bo,
-            run_seed=run_seed,
-            data=data,
-            feature_columns=feature_columns,
-            label=LABEL,
-            max_iter=max_iter,
-            patience=patience,
-            acq=acq,
-            XI0=XI0, XI_MIN=XI_MIN,
-            BETA0=BETA0, BETA_MIN=BETA_MIN,
-            feature_scaler=feature_scaler,
-            label_scaler=label_scaler,
-            initial_indices=initial_indices
-        )
-
-        final_best_bo = float(best_bo[-1])
-        found_global_best_bo = abs(final_best_bo - global_best_value) < 1e-12
-        ratio_bo = final_best_bo / global_best_value if global_best_value != 0 else np.nan
-
-        row_bo = {
-            **base_row,
-            "run_id": run_id_bo,
-            "method": "bo",
-            "acq_param_last": acq_param_last_bo,
-            "iters_done": len(best_bo) - 1,
-            "stopped_early": (len(best_bo) - 1) < max_iter,
-            "final_best": final_best_bo,
-            "ratio_to_optimum": ratio_bo,
-            "found_global_best": found_global_best_bo,
-        }
-
-        # Random run
-        run_id_rd = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_wc_TH{tH:g}_pH{pH:g}_TL{tL:g}_pL{pL:g}_s{run_seed}_random"
+        # RANDOM
+        run_id_rd = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_wc_{wc_st}_s{run_seed}_random"
         best_rd, hist_rd, _ = run_one_bo_or_random(
             method="random",
             run_id=run_id_rd,
@@ -561,7 +508,7 @@ for (tH, pH, tL, pL) in WC_STATES:
             label=LABEL,
             max_iter=max_iter,
             patience=patience,
-            acq=acq,  # unused for random
+            acq="none",
             XI0=XI0, XI_MIN=XI_MIN,
             BETA0=BETA0, BETA_MIN=BETA_MIN,
             feature_scaler=feature_scaler,
@@ -570,38 +517,70 @@ for (tH, pH, tL, pL) in WC_STATES:
         )
 
         final_best_rd = float(best_rd[-1])
-        found_global_best_rd = abs(final_best_rd - global_best_value) < 1e-12
         ratio_rd = final_best_rd / global_best_value if global_best_value != 0 else np.nan
 
         row_rd = {
             **base_row,
             "run_id": run_id_rd,
             "method": "random",
+            "acq": "none",
             "acq_param_last": np.nan,
             "iters_done": len(best_rd) - 1,
             "stopped_early": (len(best_rd) - 1) < max_iter,
             "final_best": final_best_rd,
             "ratio_to_optimum": ratio_rd,
-            "found_global_best": found_global_best_rd,
+            "found_global_best": abs(final_best_rd - global_best_value) < 1e-12,
         }
 
+        # BO acquisitions
+        bo_rows = []
+        bo_histories = []
+
+        for acq_name in ACQ_LIST:
+            run_id_bo = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_wc_{wc_st}_s{run_seed}_bo_{acq_name}"
+            best_bo, hist_bo, acq_param_last_bo = run_one_bo_or_random(
+                method="bo",
+                run_id=run_id_bo,
+                run_seed=run_seed,
+                data=data,
+                feature_columns=feature_columns,
+                label=LABEL,
+                max_iter=max_iter,
+                patience=patience,
+                acq=acq_name,
+                XI0=XI0, XI_MIN=XI_MIN,
+                BETA0=BETA0, BETA_MIN=BETA_MIN,
+                feature_scaler=feature_scaler,
+                label_scaler=label_scaler,
+                initial_indices=initial_indices
+            )
+
+            final_best_bo = float(best_bo[-1])
+            ratio_bo = final_best_bo / global_best_value if global_best_value != 0 else np.nan
+
+            bo_rows.append({
+                **base_row,
+                "run_id": run_id_bo,
+                "method": "bo",
+                "acq": acq_name,
+                "acq_param_last": float(acq_param_last_bo) if np.isfinite(acq_param_last_bo) else np.nan,
+                "iters_done": len(best_bo) - 1,
+                "stopped_early": (len(best_bo) - 1) < max_iter,
+                "final_best": final_best_bo,
+                "ratio_to_optimum": ratio_bo,
+                "found_global_best": abs(final_best_bo - global_best_value) < 1e-12,
+            })
+            bo_histories.extend(hist_bo)
+
         # SAVE
-        pd.DataFrame([row_bo, row_rd]).to_csv(
-            RESULTS_FILE,
-            mode="a",
-            header=not RESULTS_FILE.exists(),
-            index=False
+        pd.DataFrame([row_rd] + bo_rows).to_csv(
+            RESULTS_FILE, mode="a", header=not RESULTS_FILE.exists(), index=False
+        )
+        pd.DataFrame(hist_rd + bo_histories).to_csv(
+            HISTORY_FILE, mode="a", header=not HISTORY_FILE.exists(), index=False
         )
 
-        hist_df = pd.DataFrame(hist_bo + hist_rd)
-        hist_df.to_csv(
-            HISTORY_FILE,
-            mode="a",
-            header=not HISTORY_FILE.exists(),
-            index=False
-        )
-
-        print(f"[seed {run_seed}] saved BO+Random -> {RESULTS_FILE.name}, {HISTORY_FILE.name}")
+        print(f"[seed {run_seed}] saved Random + BO(EI/UCB) -> {RESULTS_FILE.name}, {HISTORY_FILE.name}")
 
     print(f"Done WC-State. Results: {RESULTS_FILE}")
     print(f"Done WC-State. History: {HISTORY_FILE}")

@@ -1,9 +1,12 @@
+# ============================================================
+# CODE 1 — DATA GENERATION (GP screening + BO(Random/EI/UCB) logging)
+# ============================================================
 import pandas as pd
 import torch
 import numpy as np
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.metrics import r2_score
 from gpytorch.mlls import ExactMarginalLogLikelihood
 import gpytorch
 import re
@@ -15,8 +18,8 @@ from datetime import datetime
 # ============================================================
 # CONFIG
 # ============================================================
-TEMP = [298, 348, 400]
-PRESSURES = 1#, 1.0, 100.0]   # low / mid / high pressure regime
+TEMP = 298
+PRESSURES = [0.1, 1.0, 100.0]  # e.g. [0.1, 1.0, 100.0]
 LABEL = "beladung_pro_vol"
 
 N_SPLITS = 10
@@ -24,23 +27,25 @@ N_BOOT = 2000
 BOOT_SEED = 42
 
 # BO stability settings
-N_BO_RUNS = 20          # e.g. 10–30 for stability
+N_BO_RUNS = 20
 BO_MAX_ITER = 100
 BO_PATIENCE = 10
 
-INIT_STRATEGY = "kmeans"    # "kmeans" or "random"
-ACQ = "ei" #["ucb", "ei"]               # "ei" or "ucb"
+INIT_STRATEGY = "kmeans"         # "kmeans" or "random"
+ACQ_LIST = ["ucb", "ei"]         # acquisitions to test
 
 # EI params
 XI0, XI_MIN = 0.05, 0.005
-# UCB params 
+# UCB params
 BETA0, BETA_MIN = 3.0, 1.0
 
-# output files
-POOLED_LOG_FILE = Path("/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/gp_pooled_r2_log_nodens_ucb_40fresh_vol_new_1bar_fresh.csv")
-#BO_LOG_FILE     = Path("/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/bo_results5.csv")
-RESULTS_FILE = Path("/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/bo_random_results_nodens_ucb_40fresh_vol_new_1bar_fresh.csv")
-HISTORY_FILE = Path("/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/bo_random_history_nodens_ucb_40fresh_vol_new_1bar_fresh.csv")
+# ============================================================
+# OUTPUT FILES (make them acquisition-neutral)
+# ============================================================
+POOLED_LOG_FILE = Path("/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/gp_pooled_r2_log_nodens_40fresh_vol_fresh.csv")
+RESULTS_FILE    = Path("/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/bo_random_results_nodens_40fresh_vol_fresh.csv")
+HISTORY_FILE    = Path("/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/bo_random_history_nodens_40fresh_vol_fresh.csv")
+
 # ============================================================
 # HELPERS
 # ============================================================
@@ -53,124 +58,6 @@ def is_bin_column(col) -> bool:
     if re.fullmatch(r"bin_\d+", s):
         return True
     return False
-
-def run_one_bo_or_random(
-        *,
-        method,                   # "bo" or "random"
-        run_id,
-        run_seed,
-        data,
-        feature_columns,
-        label,
-        max_iter,
-        patience,
-        init_strategy,
-        acq,                      # "ei" or "ucb" (only used for method="bo")
-        XI0, XI_MIN,
-        BETA0, BETA_MIN,
-        feature_scaler,
-        label_scaler,
-        initial_indices
-    ):
-    """Run one BO or Random trajectory starting from the same initial set."""
-    
-    candidates = data.copy()
-
-    # fixed initial set
-    selected = candidates.loc[initial_indices].copy()
-    candidates = candidates.drop(initial_indices).copy()
-
-    # --- FIX: numeric state, logged consistently everywhere ---
-    t_state = float(data["temperature_kelvin"].iloc[0])
-    p_state = float(data["pressure_bar"].iloc[0])
-
-    best = [float(selected[label].max())]
-
-    history = [{
-        "run_id": run_id,
-        "seed": run_seed,
-        "iter": 0,
-        "best_so_far": best[0],
-        "temperature_kelvin": t_state,
-        "pressure_bar": p_state,
-        "method": method
-    }]
-
-    acq_param_last = np.nan
-    rng = np.random.default_rng(run_seed)
-
-    for i in range(max_iter):
-
-        # early stop if plateau
-        if len(best) >= patience and len(np.unique(np.round(best[-patience:], 12))) == 1:
-            break
-
-        if len(candidates) == 0:
-            break
-
-        # --------------------------------------------------
-        # PICK NEXT CANDIDATE
-        # --------------------------------------------------
-        if method == "random":
-            pick = rng.integers(0, len(candidates))
-
-        elif method == "bo":
-            # build train/test (global scaling)
-            train_x = torch.tensor(
-                feature_scaler.transform(selected[feature_columns].values),
-                dtype=torch.float32
-            )
-            train_y = torch.tensor(
-                label_scaler.transform(selected[[label]].values),
-                dtype=torch.float32
-            ).flatten()
-
-            test_x = torch.tensor(
-                feature_scaler.transform(candidates[feature_columns].values),
-                dtype=torch.float32
-            )
-
-            model, likelihood, _ = train_gp(train_x, train_y, 250)
-
-            with torch.no_grad():
-                pred = model(test_x)
-                mean, var = pred.mean, pred.variance
-
-            best_f = train_y.max()
-
-            if acq == "ei":
-                xi = max(XI_MIN, XI0 * (0.95 ** i))
-                score = log_expected_improvement(mean, var, best_f, xi)
-                acq_param_last = float(xi)
-            else:
-                beta = max(BETA_MIN, BETA0 * (0.97 ** i))
-                score = ucb(mean, var, beta)
-                acq_param_last = float(beta)
-
-            pick = int(torch.argmax(score).item())
-
-        else:
-            raise ValueError("method must be 'bo' or 'random'")
-
-        # --------------------------------------------------
-        # UPDATE SETS
-        # --------------------------------------------------
-        selected = pd.concat([selected, candidates.iloc[[pick]]], ignore_index=False)
-        candidates = candidates.drop(candidates.index[pick])
-
-        best.append(float(selected[label].max()))
-
-        history.append({
-            "run_id": run_id,
-            "seed": run_seed,
-            "iter": len(best) - 1,
-            "best_so_far": best[-1],
-            "temperature_kelvin": t_state,
-            "pressure_bar": p_state,
-            "method": method
-        })
-
-    return best, history, acq_param_last
 
 def pooled_r2_with_bootstrap_ci(results, label, pred_col=None, n_boot=2000, seed=42, ci=95):
     if pred_col is None:
@@ -276,40 +163,159 @@ def log_expected_improvement(mean, var, best_f, xi=0.0):
 def ucb(mean, var, beta=2.0):
     return mean + beta * torch.sqrt(var)
 
+def run_one_bo_or_random(
+        *,
+        method,                   # "bo" or "random"
+        run_id,
+        run_seed,
+        data,
+        feature_columns,
+        label,
+        max_iter,
+        patience,
+        init_strategy,
+        acq,                      # "ei" or "ucb" (only used for method="bo"), for random use "none"
+        XI0, XI_MIN,
+        BETA0, BETA_MIN,
+        feature_scaler,
+        label_scaler,
+        initial_indices
+    ):
+    """Run one BO or Random trajectory starting from the same initial set."""
+
+    candidates = data.copy()
+
+    # fixed initial set
+    selected = candidates.loc[initial_indices].copy()
+    candidates = candidates.drop(initial_indices).copy()
+
+    # numeric state
+    t_state = float(data["temperature_kelvin"].iloc[0])
+    p_state = float(data["pressure_bar"].iloc[0])
+
+    best = [float(selected[label].max())]
+
+    # history: log method + acq + per-iter acq_param (xi/beta)
+    history = [{
+        "run_id": run_id,
+        "seed": run_seed,
+        "iter": 0,
+        "best_so_far": best[0],
+        "temperature_kelvin": t_state,
+        "pressure_bar": p_state,
+        "method": method,
+        "acq": (acq if method == "bo" else "none"),
+        "acq_param": np.nan
+    }]
+
+    acq_param_last = np.nan
+    rng = np.random.default_rng(run_seed)
+
+    for i in range(max_iter):
+
+        # early stop if plateau
+        if len(best) >= patience and len(np.unique(np.round(best[-patience:], 12))) == 1:
+            break
+
+        if len(candidates) == 0:
+            break
+
+        # --------------------------------------------------
+        # PICK NEXT CANDIDATE
+        # --------------------------------------------------
+        if method == "random":
+            pick = rng.integers(0, len(candidates))
+            acq_param_last = np.nan
+
+        elif method == "bo":
+            # build train/test (global scaling)
+            train_x = torch.tensor(
+                feature_scaler.transform(selected[feature_columns].values),
+                dtype=torch.float32
+            )
+            train_y = torch.tensor(
+                label_scaler.transform(selected[[label]].values),
+                dtype=torch.float32
+            ).flatten()
+
+            test_x = torch.tensor(
+                feature_scaler.transform(candidates[feature_columns].values),
+                dtype=torch.float32
+            )
+
+            model, likelihood, _ = train_gp(train_x, train_y, 250)
+
+            with torch.no_grad():
+                pred = model(test_x)
+                mean, var = pred.mean, pred.variance
+
+            best_f = train_y.max()
+
+            if acq == "ei":
+                xi = max(XI_MIN, XI0 * (0.95 ** i))
+                score = log_expected_improvement(mean, var, best_f, xi)
+                acq_param_last = float(xi)
+            elif acq == "ucb":
+                beta = max(BETA_MIN, BETA0 * (0.97 ** i))
+                score = ucb(mean, var, beta)
+                acq_param_last = float(beta)
+            else:
+                raise ValueError("For method='bo', acq must be 'ei' or 'ucb'")
+
+            pick = int(torch.argmax(score).item())
+
+        else:
+            raise ValueError("method must be 'bo' or 'random'")
+
+        # --------------------------------------------------
+        # UPDATE SETS
+        # --------------------------------------------------
+        selected = pd.concat([selected, candidates.iloc[[pick]]], ignore_index=False)
+        candidates = candidates.drop(candidates.index[pick])
+
+        best.append(float(selected[label].max()))
+
+        history.append({
+            "run_id": run_id,
+            "seed": run_seed,
+            "iter": len(best) - 1,
+            "best_so_far": best[-1],
+            "temperature_kelvin": t_state,
+            "pressure_bar": p_state,
+            "method": method,
+            "acq": (acq if method == "bo" else "none"),
+            "acq_param": (float(acq_param_last) if method == "bo" else np.nan)
+        })
+
+    return best, history, acq_param_last
+
 # ============================================================
 # LOAD + PREPARE DATA (your existing pipeline)
 # ============================================================
 dft_data1 = pd.read_csv('/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/dft_data_temp_pressure_swingswingswing.csv')
 dft_data2 = pd.read_csv("/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/dft_data_temp_pressure_präsi_20bin.csv")
-dft_data1["density_bulk"] = (
-    dft_data1["density_bulk"]
-    .astype(str)                            # sicherstellen, dass alles string ist
-    .str.strip()                             # Leerzeichen weg
-    .str.replace('[', '', regex=False)       # "[" entfernen
-    .str.replace(']', '', regex=False)       # "]" entfernen
-)
-dft_data2["density_bulk"] = (
-    dft_data2["density_bulk"]
-    .astype(str)                            # sicherstellen, dass alles string ist
-    .str.strip()                             # Leerzeichen weg
-    .str.replace('[', '', regex=False)       # "[" entfernen
-    .str.replace(']', '', regex=False)       # "]" entfernen
-)
-dft_data1["density_bulk"] = pd.to_numeric(dft_data1["density_bulk"], errors="coerce")
-dft_data2["density_bulk"] = pd.to_numeric(dft_data2["density_bulk"], errors="coerce")
+
+for df in (dft_data1, dft_data2):
+    df["density_bulk"] = (
+        df["density_bulk"]
+        .astype(str).str.strip()
+        .str.replace('[', '', regex=False)
+        .str.replace(']', '', regex=False)
+    )
+    df["density_bulk"] = pd.to_numeric(df["density_bulk"], errors="coerce")
+
 dft_data = pd.concat([dft_data1, dft_data2], ignore_index=True).drop_duplicates()
+
 expV_data = pd.read_csv("/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/Vext_allTEMP_hist_no_pressure_no_chem_40b_swing.csv")
-#expV_data = pd.read_csv("/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/Hist_x_log_20b_FINALE.csv")
 
 data_all = pd.merge(dft_data, expV_data, "inner", on=["structure_name", "temperature_kelvin"])
 feature_columns = [col for col in data_all.columns if is_bin_column(col)]
 
 data_all = data_all[data_all.beladung_mol_per_kg > 0].copy()
 
-# create labels/features as you did
+# labels/features
 data_all["beladung_pro_vol"] = (
     data_all["beladung_atoms"]
-    #.div(data_all["density_bulk"], axis=0)
     .div(data_all["volume_kubAng"], axis=0)
 )
 
@@ -324,14 +330,13 @@ data_all[feature_columns] = (
 # ============================================================
 kf = KFold(n_splits=N_SPLITS, shuffle=True, random_state=42)
 
-for temperature in TEMP:
+for pressure in PRESSURES:
     print("\n" + "="*80)
-    print(f"STATE: T={temperature} K, p={PRESSURES} bar")
+    print(f"STATE: T={TEMP} K, p={pressure} bar")
 
     # Filter state
-    data = data_all[(data_all.temperature_kelvin == temperature) & (data_all.pressure_bar == PRESSURES)].copy()
+    data = data_all[(data_all.temperature_kelvin == TEMP) & (data_all.pressure_bar == pressure)].copy()
 
-    # You said: always 245 structures – still guard
     if len(data) < 10:
         print(f"Skipping state (too few samples): n={len(data)}")
         continue
@@ -352,13 +357,11 @@ for temperature in TEMP:
         test_df = data.iloc[test_idx].copy()
         test_df["fold"] = fold
 
-        # feature scaling (per fold, as in your code)
         feature_transformer = MinMaxScaler()
         feature_transformer.fit(x_train)
         xt_train = torch.tensor(feature_transformer.transform(x_train), dtype=torch.float64)
         xt_test  = torch.tensor(feature_transformer.transform(x_test), dtype=torch.float64)
 
-        # label scaling (per fold, as in your code)
         label_transformer = MinMaxScaler()
         label_transformer.fit(y_train.unsqueeze(1))
         yt_train = torch.tensor(label_transformer.transform(y_train.unsqueeze(1)).flatten(), dtype=torch.float64)
@@ -376,17 +379,17 @@ for temperature in TEMP:
 
     results = pd.concat(split_info, ignore_index=True)
 
-    oof_file = Path(f"/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/oof_T{temperature:g}_p{PRESSURES}.csv")
+    oof_file = Path(f"/Users/danielbock/MASTERTHESIS/MASTA/DataArchiv/oof_T{TEMP}_p{pressure:g}.csv")
     results.to_csv(oof_file, index=False)
     print(f"Saved OOF predictions -> {oof_file}")
-    
+
     pooled_r2, boot_std, (ci_low, ci_high), _ = pooled_r2_with_bootstrap_ci(
         results=results, label=LABEL, n_boot=N_BOOT, seed=BOOT_SEED, ci=95
     )
 
     pooled_entry = pd.DataFrame([{
-        "temperature_kelvin": temperature,
-        "pressure_bar": PRESSURES,
+        "temperature_kelvin": TEMP,
+        "pressure_bar": pressure,
         "label": LABEL,
         "n_samples": len(results),
         "pooled_r2": pooled_r2,
@@ -399,43 +402,38 @@ for temperature in TEMP:
     print(f"Pooled R²  : {pooled_r2:.4f}  (95% CI [{ci_low:.4f}, {ci_high:.4f}])")
     print(f"Saved -> {POOLED_LOG_FILE}")
 
- 
-    # =============================
-    # MAIN (inside your pressure loop)
-    # =============================
+    # -------------------------
+    # 2) BO / Random stability runs (Random + BO(EI)+BO(UCB))
+    # -------------------------
     global_best_value = float(data[LABEL].max())
     n_candidates = len(data)
-    
+
     max_iter = BO_MAX_ITER
     patience = BO_PATIENCE
     init = INIT_STRATEGY
-    acq = ACQ
-    
+
     n_initial = max(3, min(10, n_candidates - 1))
-    
+
     # global scaling (fit once per state)
     feature_scaler = MinMaxScaler().fit(data[feature_columns].values)
     label_scaler   = MinMaxScaler().fit(data[[LABEL]].values)
-    
-    for run_seed in range(N_BO_RUNS):
 
-        # deterministic seeds
+    for run_seed in range(N_BO_RUNS):
         np.random.seed(run_seed)
         torch.manual_seed(run_seed)
-    
-        # ---- initial selection (SAME for BO and Random) ----
+
+        # same initial set for all strategies
         if init == "kmeans":
             initial_indices = initial_indices_kmeans(data, feature_columns, n_initial, random_state=run_seed)
         else:
             initial_indices = data.sample(n=n_initial, replace=False, random_state=run_seed).index
-    
+
         initial_structures = data.loc[initial_indices, "structure_name"].astype(str).tolist()
-    
-        # shared base info
+
         base_row = {
             "seed": run_seed,
-            "temperature_kelvin": temperature,
-            "pressure_bar": PRESSURES,
+            "temperature_kelvin": TEMP,
+            "pressure_bar": pressure,
             "label": LABEL,
             "n_candidates": n_candidates,
             "init_strategy": init,
@@ -444,52 +442,11 @@ for temperature in TEMP:
             "max_iter": max_iter,
             "patience": patience,
             "global_best": global_best_value,
-            "acq": acq,  # keep even for random (makes filtering easy)
         }
-    
-        # ====================================================
-        # BO RUN
-        # ====================================================
-        run_id_bo = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_T{temperature}_s{run_seed}_bo"
-        best_bo, hist_bo, acq_param_last_bo = run_one_bo_or_random(
-            method="bo",
-            run_id=run_id_bo,
-            run_seed=run_seed,
-            data=data,
-            feature_columns=feature_columns,
-            label=LABEL,
-            max_iter=max_iter,
-            patience=patience,
-            init_strategy=init,
-            acq=acq,
-            XI0=XI0, XI_MIN=XI_MIN,
-            BETA0=BETA0, BETA_MIN=BETA_MIN,
-            feature_scaler=feature_scaler,
-            label_scaler=label_scaler,
-            initial_indices=initial_indices
-        )
-    
-        final_best_bo = float(best_bo[-1])
-        found_global_best_bo = abs(final_best_bo - global_best_value) < 1e-12
-        ratio_bo = final_best_bo / global_best_value if global_best_value != 0 else np.nan
-    
-        row_bo = {
-            **base_row,
-            "run_id": run_id_bo,
-            "method": "bo",
-            "acq_param_last": acq_param_last_bo,
-            "iters_done": len(best_bo) - 1,
-            "stopped_early": (len(best_bo) - 1) < max_iter,
-            "final_best": final_best_bo,
-            "ratio_to_optimum": ratio_bo,
-            "found_global_best": found_global_best_bo,
-        }
-    
-        # ====================================================
-        # RANDOM RUN (same initial set, same budget)
-        # ====================================================
-        run_id_rd = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_T{temperature}_s{run_seed}_random"
-        best_rd, hist_rd, acq_param_last_rd = run_one_bo_or_random(
+
+        # 2A) RANDOM
+        run_id_rd = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_p{pressure}_s{run_seed}_random"
+        best_rd, hist_rd, _ = run_one_bo_or_random(
             method="random",
             run_id=run_id_rd,
             run_seed=run_seed,
@@ -499,22 +456,23 @@ for temperature in TEMP:
             max_iter=max_iter,
             patience=patience,
             init_strategy=init,
-            acq=acq,  # unused
+            acq="none",
             XI0=XI0, XI_MIN=XI_MIN,
             BETA0=BETA0, BETA_MIN=BETA_MIN,
             feature_scaler=feature_scaler,
             label_scaler=label_scaler,
             initial_indices=initial_indices
         )
-    
+
         final_best_rd = float(best_rd[-1])
         found_global_best_rd = abs(final_best_rd - global_best_value) < 1e-12
         ratio_rd = final_best_rd / global_best_value if global_best_value != 0 else np.nan
-    
+
         row_rd = {
             **base_row,
             "run_id": run_id_rd,
             "method": "random",
+            "acq": "none",
             "acq_param_last": np.nan,
             "iters_done": len(best_rd) - 1,
             "stopped_early": (len(best_rd) - 1) < max_iter,
@@ -522,26 +480,60 @@ for temperature in TEMP:
             "ratio_to_optimum": ratio_rd,
             "found_global_best": found_global_best_rd,
         }
-    
-        # ====================================================
-        # SAVE (ONE clean file each)
-        # ====================================================
-        pd.DataFrame([row_bo, row_rd]).to_csv(
-            RESULTS_FILE,
-            mode="a",
-            header=not RESULTS_FILE.exists(),
-            index=False
+
+        # 2B) BO acquisitions
+        bo_rows = []
+        bo_histories = []
+
+        for acq_name in ACQ_LIST:
+            run_id_bo = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_p{pressure}_s{run_seed}_bo_{acq_name}"
+
+            best_bo, hist_bo, acq_param_last_bo = run_one_bo_or_random(
+                method="bo",
+                run_id=run_id_bo,
+                run_seed=run_seed,
+                data=data,
+                feature_columns=feature_columns,
+                label=LABEL,
+                max_iter=max_iter,
+                patience=patience,
+                init_strategy=init,
+                acq=acq_name,
+                XI0=XI0, XI_MIN=XI_MIN,
+                BETA0=BETA0, BETA_MIN=BETA_MIN,
+                feature_scaler=feature_scaler,
+                label_scaler=label_scaler,
+                initial_indices=initial_indices
+            )
+
+            final_best_bo = float(best_bo[-1])
+            found_global_best_bo = abs(final_best_bo - global_best_value) < 1e-12
+            ratio_bo = final_best_bo / global_best_value if global_best_value != 0 else np.nan
+
+            bo_rows.append({
+                **base_row,
+                "run_id": run_id_bo,
+                "method": "bo",
+                "acq": acq_name,
+                "acq_param_last": float(acq_param_last_bo) if np.isfinite(acq_param_last_bo) else np.nan,
+                "iters_done": len(best_bo) - 1,
+                "stopped_early": (len(best_bo) - 1) < max_iter,
+                "final_best": final_best_bo,
+                "ratio_to_optimum": ratio_bo,
+                "found_global_best": found_global_best_bo,
+            })
+            bo_histories.extend(hist_bo)
+
+        # SAVE
+        pd.DataFrame([row_rd] + bo_rows).to_csv(
+            RESULTS_FILE, mode="a", header=not RESULTS_FILE.exists(), index=False
         )
-    
-        pd.DataFrame(hist_bo + hist_rd).to_csv(
-            HISTORY_FILE,
-            mode="a",
-            header=not HISTORY_FILE.exists(),
-            index=False
+        pd.DataFrame(hist_rd + bo_histories).to_csv(
+            HISTORY_FILE, mode="a", header=not HISTORY_FILE.exists(), index=False
         )
-    
-        print(f"[seed {run_seed}] saved BO+Random -> {RESULTS_FILE.name}, {HISTORY_FILE.name}")
-    
+
+        print(f"[seed {run_seed}] saved Random + BO(EI/UCB) -> {RESULTS_FILE.name}, {HISTORY_FILE.name}")
+
     print(f"Done. Results: {RESULTS_FILE}")
     print(f"Done. History: {HISTORY_FILE}")
 
